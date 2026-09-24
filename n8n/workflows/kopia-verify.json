@@ -1,0 +1,180 @@
+{
+  "name": "Kopia Verify Ingest",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "kopia-verify",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "kopia-verify"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Payload normalization for the Kopia ingest workflows.\n//\n// This file is the single source for the n8n Code nodes: scripts/build-n8n.js\n// inlines these functions into n8n/workflows/*.json. Keep it dependency-free\n// and plain ES2020 so it runs unchanged inside the n8n Code node sandbox.\n\nfunction toUtcSql(value) {\n  if (value === null || value === undefined || value === '') return null;\n  const d = new Date(value);\n  if (Number.isNaN(d.getTime())) return null;\n  return d.toISOString().slice(0, 19).replace('T', ' ');\n}\n\nfunction cleanText(value) {\n  if (value === null || value === undefined) return '';\n  return String(value).trim();\n}\n\nfunction requireGroup(body) {\n  const group = cleanText(body && body.group);\n  if (!group) throw new Error('payload tidak valid: field \"group\" wajib diisi');\n  if (!Array.isArray(body.summary)) throw new Error('payload tidak valid: field \"summary\" harus array');\n  return group;\n}\n\nfunction normalizeBackup(body) {\n  const group = requireGroup(body);\n  const rows = [];\n  const warnings = [];\n\n  body.summary.forEach((item, idx) => {\n    const host = cleanText(item && item.host);\n    if (!host) {\n      warnings.push(`summary[${idx}]: host kosong, di-skip`);\n      return;\n    }\n    const rawStatus = cleanText(item.status).toUpperCase();\n    if (!rawStatus) warnings.push(`summary[${idx}] ${host}: status kosong, dicatat sebagai ERROR`);\n    rows.push({\n      host,\n      status: rawStatus === 'OK' ? 'OK' : 'ERROR',\n      error_reason: cleanText(item.error_reason),\n    });\n  });\n\n  return { group, rows, rows_json: JSON.stringify(rows), count: rows.length, warnings };\n}\n\nconst SEVERITY_ALIASES = { OK: 'OK', WARN: 'WARN', WARNING: 'WARN', CRITICAL: 'CRITICAL', CRIT: 'CRITICAL' };\n\nfunction normalizeVerify(body) {\n  const group = requireGroup(body);\n  const rows = [];\n  const warnings = [];\n\n  body.summary.forEach((item, idx) => {\n    const domain = cleanText(item && item.domain);\n    if (!domain) {\n      warnings.push(`summary[${idx}]: domain kosong, di-skip`);\n      return;\n    }\n    // Missing/unknown severity falls back to WARN, never CRITICAL: the old\n    // Node-RED flow defaulted to CRITICAL and mislabeled WARN apps.\n    const rawSeverity = cleanText(item.severity).toUpperCase();\n    let severity = SEVERITY_ALIASES[rawSeverity];\n    if (!severity) {\n      severity = 'WARN';\n      warnings.push(`summary[${idx}] ${domain}: severity \"${rawSeverity}\" tidak dikenal/kosong, dicatat sebagai WARN`);\n    }\n    const count = Number.parseInt(item.snapshot_count, 10);\n    rows.push({\n      domain,\n      severity,\n      latest_snapshot_time: toUtcSql(item.latest_snapshot_time),\n      snapshot_count: Number.isFinite(count) ? count : null,\n    });\n  });\n\n  return { group, rows, rows_json: JSON.stringify(rows), count: rows.length, warnings };\n}\n\nreturn [{ json: normalizeVerify($input.first().json.body || {}) }];"
+      },
+      "name": "Normalize Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO `groups` (name) VALUES ($1) ON DUPLICATE KEY UPDATE name = name;",
+        "options": {
+          "queryReplacement": "={{ $json.group }}"
+        }
+      },
+      "name": "Upsert Group",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        440,
+        0
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "REPLACE_ME",
+          "name": "MySQL backup_monitoring"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO verify_apps (domain, group_id)\nSELECT * FROM (\n  SELECT DISTINCT jt.domain, g.id AS gid\n  FROM JSON_TABLE($1, '$[*]' COLUMNS (domain VARCHAR(255) COLLATE utf8mb4_unicode_ci PATH '$.domain')) AS jt\n  JOIN `groups` g ON g.name = $2\n) AS src\nON DUPLICATE KEY UPDATE group_id = src.gid;",
+        "options": {
+          "queryReplacement": "={{ $('Normalize Payload').first().json.rows_json }},{{ $('Normalize Payload').first().json.group }}"
+        }
+      },
+      "name": "Upsert Verify Apps",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        660,
+        0
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "REPLACE_ME",
+          "name": "MySQL backup_monitoring"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO verify_records (app_id, group_id, report_date, reported_at, severity, latest_snapshot_time, snapshot_count)\nSELECT a.id, g.id, DATE(UTC_TIMESTAMP() + INTERVAL 7 HOUR), UTC_TIMESTAMP(), jt.severity, jt.latest_snapshot_time, jt.snapshot_count\nFROM JSON_TABLE($1, '$[*]' COLUMNS (\n  domain VARCHAR(255) COLLATE utf8mb4_unicode_ci PATH '$.domain',\n  severity VARCHAR(10) PATH '$.severity',\n  latest_snapshot_time DATETIME PATH '$.latest_snapshot_time' NULL ON EMPTY,\n  snapshot_count INT PATH '$.snapshot_count' NULL ON EMPTY\n)) AS jt\nJOIN verify_apps a ON a.domain = jt.domain\nJOIN `groups` g ON g.name = $2;",
+        "options": {
+          "queryReplacement": "={{ $('Normalize Payload').first().json.rows_json }},{{ $('Normalize Payload').first().json.group }}"
+        }
+      },
+      "name": "Insert Verify Records",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        880,
+        0
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "REPLACE_ME",
+          "name": "MySQL backup_monitoring"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, group: $('Normalize Payload').first().json.group, received: $('Normalize Payload').first().json.count, stored: $json.affectedRows ?? 0, warnings: $('Normalize Payload').first().json.warnings }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Payload": {
+      "main": [
+        [
+          {
+            "node": "Upsert Group",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Group": {
+      "main": [
+        [
+          {
+            "node": "Upsert Verify Apps",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert Verify Apps": {
+      "main": [
+        [
+          {
+            "node": "Insert Verify Records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Verify Records": {
+      "main": [
+        [
+          {
+            "node": "Respond OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all"
+  },
+  "pinData": {}
+}

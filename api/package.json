@@ -1,0 +1,17 @@
+{
+  "name": "backup-monitoring-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "REST API Backup Monitoring v2 (MySQL)",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "mysql2": "^3.24.4"
+  }
+}
