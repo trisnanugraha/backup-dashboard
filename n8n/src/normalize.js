@@ -16,6 +16,19 @@ function cleanText(value) {
   return String(value).trim();
 }
 
+// The n8n MySQL node splits "Query Parameters" on commas (even array
+// expressions are stringified first), so every value handed to SQL is base64
+// encoded here and decoded with FROM_BASE64() in n8n/src/sql.js.
+function b64(text) {
+  if (typeof Buffer !== 'undefined') return Buffer.from(text, 'utf8').toString('base64');
+  return btoa(unescape(encodeURIComponent(text)));
+}
+
+function result(group, rows, warnings) {
+  const rowsJson = JSON.stringify(rows);
+  return { group, rows, count: rows.length, warnings, group_b64: b64(group), rows_b64: b64(rowsJson) };
+}
+
 function requireGroup(body) {
   const group = cleanText(body && body.group);
   if (!group) throw new Error('payload tidak valid: field "group" wajib diisi');
@@ -43,7 +56,7 @@ function normalizeBackup(body) {
     });
   });
 
-  return { group, rows, rows_json: JSON.stringify(rows), count: rows.length, warnings };
+  return result(group, rows, warnings);
 }
 
 const SEVERITY_ALIASES = { OK: 'OK', WARN: 'WARN', WARNING: 'WARN', CRITICAL: 'CRITICAL', CRIT: 'CRITICAL' };
@@ -76,7 +89,7 @@ function normalizeVerify(body) {
     });
   });
 
-  return { group, rows, rows_json: JSON.stringify(rows), count: rows.length, warnings };
+  return result(group, rows, warnings);
 }
 
-module.exports = { normalizeBackup, normalizeVerify, toUtcSql };
+module.exports = { normalizeBackup, normalizeVerify, toUtcSql, b64 };

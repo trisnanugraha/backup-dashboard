@@ -228,9 +228,9 @@ test('integration', { skip: !URL_ENV && 'MYSQL_TEST_URL tidak di-set' }, async (
     };
     const run = async (q, params) => (await db.query(...toQ(q, params)))[0];
     const b = normalizeBackup({ group: 'Grp, baru', summary: [{ host: 'n1', status: 'OK' }, { host: 'a1', status: 'ERROR', error_reason: "it's broken" }] });
-    await run(ingestSql.upsertGroup, [b.group]);
-    await run(ingestSql.upsertHosts, [b.rows_json, b.group]);
-    const ins = await run(ingestSql.insertBackupRecords, [b.rows_json, b.group]);
+    await run(ingestSql.upsertGroup, [b.rows_b64, b.group_b64]);
+    await run(ingestSql.upsertHosts, [b.rows_b64, b.group_b64]);
+    const ins = await run(ingestSql.insertBackupRecords, [b.rows_b64, b.group_b64]);
     assert.equal(ins.affectedRows, 2);
     const [[row]] = await db.query(
       `SELECT h.hostname, g.name, r.report_date = DATE(UTC_TIMESTAMP() + INTERVAL 7 HOUR) AS wib_ok
@@ -240,8 +240,8 @@ test('integration', { skip: !URL_ENV && 'MYSQL_TEST_URL tidak di-set' }, async (
     assert.deepEqual([row.hostname, row.name, row.wib_ok], ['a1', 'Grp, baru', 1]); // host pindah group
 
     const v = normalizeVerify({ group: 'Grp, baru', summary: [{ domain: 'new.go.id' }] });
-    await run(ingestSql.upsertVerifyApps, [v.rows_json, v.group]);
-    await run(ingestSql.insertVerifyRecords, [v.rows_json, v.group]);
+    await run(ingestSql.upsertVerifyApps, [v.rows_b64, v.group_b64]);
+    await run(ingestSql.insertVerifyRecords, [v.rows_b64, v.group_b64]);
     const [[vr]] = await db.query("SELECT severity FROM verify_records r JOIN verify_apps a ON a.id = r.app_id WHERE a.domain = 'new.go.id'");
     assert.equal(vr.severity, 'WARN');
   });

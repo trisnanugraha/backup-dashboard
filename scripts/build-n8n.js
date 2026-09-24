@@ -22,6 +22,8 @@ function codeNode(fnName) {
   ].join('\n');
 }
 
+// Query parameters are split on commas by the MySQL node, so only base64
+// values (no commas) are passed; see n8n/src/normalize.js.
 function mysqlNode(name, query, replacement, position) {
   return {
     parameters: {
@@ -55,13 +57,13 @@ function buildWorkflow({ name, webhookPath, fnName, upsertName, upsertSql, inser
       typeVersion: 2,
       position: [220, 0],
     },
-    mysqlNode('Upsert Group', sql.upsertGroup, '={{ $json.group }}', [440, 0]),
-    mysqlNode(upsertName, upsertSql, `={{ ${normalized}.rows_json }},{{ ${normalized}.group }}`, [660, 0]),
-    mysqlNode(insertName, insertSql, `={{ ${normalized}.rows_json }},{{ ${normalized}.group }}`, [880, 0]),
+    mysqlNode('Upsert Group', sql.upsertGroup, `={{ ${normalized}.rows_b64 }},{{ ${normalized}.group_b64 }}`, [440, 0]),
+    mysqlNode(upsertName, upsertSql, `={{ ${normalized}.rows_b64 }},{{ ${normalized}.group_b64 }}`, [660, 0]),
+    mysqlNode(insertName, insertSql, `={{ ${normalized}.rows_b64 }},{{ ${normalized}.group_b64 }}`, [880, 0]),
     {
       parameters: {
         respondWith: 'json',
-        responseBody: `={{ JSON.stringify({ ok: true, group: ${normalized}.group, received: ${normalized}.count, stored: $json.affectedRows ?? 0, warnings: ${normalized}.warnings }) }}`,
+        responseBody: `={{ JSON.stringify({ ok: true, group: ${normalized}.group, received: ${normalized}.count, warnings: ${normalized}.warnings }) }}`,
         options: { responseCode: 200 },
       },
       name: 'Respond OK',

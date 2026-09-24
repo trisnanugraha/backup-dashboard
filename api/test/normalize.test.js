@@ -22,7 +22,8 @@ test('backup: status dinormalisasi, host kosong di-skip', () => {
   assert.equal(out.group, 'g');
   assert.deepEqual(out.rows.map((r) => [r.host, r.status]), [['h1', 'OK'], ['h2', 'ERROR'], ['h3', 'ERROR']]);
   assert.equal(out.warnings.length, 2);
-  assert.equal(JSON.parse(out.rows_json).length, 3);
+  assert.equal(JSON.parse(Buffer.from(out.rows_b64, 'base64').toString('utf8')).length, 3);
+  assert.equal(Buffer.from(out.group_b64, 'base64').toString('utf8'), 'g');
 });
 
 test('payload tidak valid ditolak', () => {

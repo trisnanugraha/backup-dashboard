@@ -52,14 +52,18 @@ curl -s -X POST http://localhost:5678/webhook/kopia-backup -H 'Content-Type: app
   "group": "backup-to-drc-containers",
   "summary": [{"host": "tangerangkota-drc", "status": "OK", "error_reason": ""}]
 }'
-# {"ok":true,"group":"backup-to-drc-containers","received":1,"stored":1,"warnings":[]}
+# {"ok":true,"group":"backup-to-drc-containers","received":1,"warnings":[]}
 ```
+
+Diuji end-to-end di n8n 2.40.6 (MySQL node typeVersion 2.4) + MySQL 8.0.
 
 Perilaku ingest:
 - `reported_at` = waktu laporan diterima (UTC), `report_date` = tanggal WIB saat diterima. Keduanya pakai `UTC_TIMESTAMP()`, jadi tidak tergantung timezone session MySQL.
 - `severity` verify kosong / tidak dikenal → disimpan sebagai **WARN** dan dicatat di `warnings` response (tidak pernah default ke CRITICAL).
 - `status` backup selain `OK` → `ERROR`. Host/domain kosong di-skip dan masuk `warnings`.
 - Host/domain yang pindah group mengikuti group laporan terakhir; record lama tetap menyimpan group saat itu.
+- Payload tanpa `group` / `summary` bukan array → workflow error, webhook membalas HTTP 500 (Cronicle melihatnya sebagai gagal).
+- Parameter ke MySQL node dikirim dalam bentuk base64 lalu di-decode dengan `FROM_BASE64()` di SQL. Alasannya: field *Query Parameters* di MySQL node n8n memecah nilai berdasarkan koma (ekspresi array pun dijadikan string dulu), sehingga JSON atau nama group yang mengandung koma akan rusak. Nilai tetap dikirim sebagai parameter, bukan disisipkan ke teks SQL.
 
 Kalau logic ingest diubah, edit `n8n/src/*` lalu jalankan `node scripts/build-n8n.js` dan import ulang.
 

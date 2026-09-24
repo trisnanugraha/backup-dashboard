@@ -21,7 +21,7 @@
       "parameters": {
         "mode": "runOnceForAllItems",
         "language": "javaScript",
-        "jsCode": "// Payload normalization for the Kopia ingest workflows.\n//\n// This file is the single source for the n8n Code nodes: scripts/build-n8n.js\n// inlines these functions into n8n/workflows/*.json. Keep it dependency-free\n// and plain ES2020 so it runs unchanged inside the n8n Code node sandbox.\n\nfunction toUtcSql(value) {\n  if (value === null || value === undefined || value === '') return null;\n  const d = new Date(value);\n  if (Number.isNaN(d.getTime())) return null;\n  return d.toISOString().slice(0, 19).replace('T', ' ');\n}\n\nfunction cleanText(value) {\n  if (value === null || value === undefined) return '';\n  return String(value).trim();\n}\n\nfunction requireGroup(body) {\n  const group = cleanText(body && body.group);\n  if (!group) throw new Error('payload tidak valid: field \"group\" wajib diisi');\n  if (!Array.isArray(body.summary)) throw new Error('payload tidak valid: field \"summary\" harus array');\n  return group;\n}\n\nfunction normalizeBackup(body) {\n  const group = requireGroup(body);\n  const rows = [];\n  const warnings = [];\n\n  body.summary.forEach((item, idx) => {\n    const host = cleanText(item && item.host);\n    if (!host) {\n      warnings.push(`summary[${idx}]: host kosong, di-skip`);\n      return;\n    }\n    const rawStatus = cleanText(item.status).toUpperCase();\n    if (!rawStatus) warnings.push(`summary[${idx}] ${host}: status kosong, dicatat sebagai ERROR`);\n    rows.push({\n      host,\n      status: rawStatus === 'OK' ? 'OK' : 'ERROR',\n      error_reason: cleanText(item.error_reason),\n    });\n  });\n\n  return { group, rows, rows_json: JSON.stringify(rows), count: rows.length, warnings };\n}\n\nconst SEVERITY_ALIASES = { OK: 'OK', WARN: 'WARN', WARNING: 'WARN', CRITICAL: 'CRITICAL', CRIT: 'CRITICAL' };\n\nfunction normalizeVerify(body) {\n  const group = requireGroup(body);\n  const rows = [];\n  const warnings = [];\n\n  body.summary.forEach((item, idx) => {\n    const domain = cleanText(item && item.domain);\n    if (!domain) {\n      warnings.push(`summary[${idx}]: domain kosong, di-skip`);\n      return;\n    }\n    // Missing/unknown severity falls back to WARN, never CRITICAL: the old\n    // Node-RED flow defaulted to CRITICAL and mislabeled WARN apps.\n    const rawSeverity = cleanText(item.severity).toUpperCase();\n    let severity = SEVERITY_ALIASES[rawSeverity];\n    if (!severity) {\n      severity = 'WARN';\n      warnings.push(`summary[${idx}] ${domain}: severity \"${rawSeverity}\" tidak dikenal/kosong, dicatat sebagai WARN`);\n    }\n    const count = Number.parseInt(item.snapshot_count, 10);\n    rows.push({\n      domain,\n      severity,\n      latest_snapshot_time: toUtcSql(item.latest_snapshot_time),\n      snapshot_count: Number.isFinite(count) ? count : null,\n    });\n  });\n\n  return { group, rows, rows_json: JSON.stringify(rows), count: rows.length, warnings };\n}\n\nreturn [{ json: normalizeBackup($input.first().json.body || {}) }];"
+        "jsCode": "// Payload normalization for the Kopia ingest workflows.\n//\n// This file is the single source for the n8n Code nodes: scripts/build-n8n.js\n// inlines these functions into n8n/workflows/*.json. Keep it dependency-free\n// and plain ES2020 so it runs unchanged inside the n8n Code node sandbox.\n\nfunction toUtcSql(value) {\n  if (value === null || value === undefined || value === '') return null;\n  const d = new Date(value);\n  if (Number.isNaN(d.getTime())) return null;\n  return d.toISOString().slice(0, 19).replace('T', ' ');\n}\n\nfunction cleanText(value) {\n  if (value === null || value === undefined) return '';\n  return String(value).trim();\n}\n\n// The n8n MySQL node splits \"Query Parameters\" on commas (even array\n// expressions are stringified first), so every value handed to SQL is base64\n// encoded here and decoded with FROM_BASE64() in n8n/src/sql.js.\nfunction b64(text) {\n  if (typeof Buffer !== 'undefined') return Buffer.from(text, 'utf8').toString('base64');\n  return btoa(unescape(encodeURIComponent(text)));\n}\n\nfunction result(group, rows, warnings) {\n  const rowsJson = JSON.stringify(rows);\n  return { group, rows, count: rows.length, warnings, group_b64: b64(group), rows_b64: b64(rowsJson) };\n}\n\nfunction requireGroup(body) {\n  const group = cleanText(body && body.group);\n  if (!group) throw new Error('payload tidak valid: field \"group\" wajib diisi');\n  if (!Array.isArray(body.summary)) throw new Error('payload tidak valid: field \"summary\" harus array');\n  return group;\n}\n\nfunction normalizeBackup(body) {\n  const group = requireGroup(body);\n  const rows = [];\n  const warnings = [];\n\n  body.summary.forEach((item, idx) => {\n    const host = cleanText(item && item.host);\n    if (!host) {\n      warnings.push(`summary[${idx}]: host kosong, di-skip`);\n      return;\n    }\n    const rawStatus = cleanText(item.status).toUpperCase();\n    if (!rawStatus) warnings.push(`summary[${idx}] ${host}: status kosong, dicatat sebagai ERROR`);\n    rows.push({\n      host,\n      status: rawStatus === 'OK' ? 'OK' : 'ERROR',\n      error_reason: cleanText(item.error_reason),\n    });\n  });\n\n  return result(group, rows, warnings);\n}\n\nconst SEVERITY_ALIASES = { OK: 'OK', WARN: 'WARN', WARNING: 'WARN', CRITICAL: 'CRITICAL', CRIT: 'CRITICAL' };\n\nfunction normalizeVerify(body) {\n  const group = requireGroup(body);\n  const rows = [];\n  const warnings = [];\n\n  body.summary.forEach((item, idx) => {\n    const domain = cleanText(item && item.domain);\n    if (!domain) {\n      warnings.push(`summary[${idx}]: domain kosong, di-skip`);\n      return;\n    }\n    // Missing/unknown severity falls back to WARN, never CRITICAL: the old\n    // Node-RED flow defaulted to CRITICAL and mislabeled WARN apps.\n    const rawSeverity = cleanText(item.severity).toUpperCase();\n    let severity = SEVERITY_ALIASES[rawSeverity];\n    if (!severity) {\n      severity = 'WARN';\n      warnings.push(`summary[${idx}] ${domain}: severity \"${rawSeverity}\" tidak dikenal/kosong, dicatat sebagai WARN`);\n    }\n    const count = Number.parseInt(item.snapshot_count, 10);\n    rows.push({\n      domain,\n      severity,\n      latest_snapshot_time: toUtcSql(item.latest_snapshot_time),\n      snapshot_count: Number.isFinite(count) ? count : null,\n    });\n  });\n\n  return result(group, rows, warnings);\n}\n\nreturn [{ json: normalizeBackup($input.first().json.body || {}) }];"
       },
       "name": "Normalize Payload",
       "type": "n8n-nodes-base.code",
@@ -34,9 +34,9 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO `groups` (name) VALUES ($1) ON DUPLICATE KEY UPDATE name = name;",
+        "query": "INSERT INTO `groups` (name) VALUES (CONVERT(FROM_BASE64($2) USING utf8mb4) COLLATE utf8mb4_unicode_ci) ON DUPLICATE KEY UPDATE name = name;",
         "options": {
-          "queryReplacement": "={{ $json.group }}"
+          "queryReplacement": "={{ $('Normalize Payload').first().json.rows_b64 }},{{ $('Normalize Payload').first().json.group_b64 }}"
         }
       },
       "name": "Upsert Group",
@@ -56,9 +56,9 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO hosts (hostname, group_id)\nSELECT * FROM (\n  SELECT DISTINCT jt.host, g.id AS gid\n  FROM JSON_TABLE($1, '$[*]' COLUMNS (host VARCHAR(255) COLLATE utf8mb4_unicode_ci PATH '$.host')) AS jt\n  JOIN `groups` g ON g.name = $2\n) AS src\nON DUPLICATE KEY UPDATE group_id = src.gid;",
+        "query": "INSERT INTO hosts (hostname, group_id)\nSELECT * FROM (\n  SELECT DISTINCT jt.host, g.id AS gid\n  FROM JSON_TABLE(CONVERT(FROM_BASE64($1) USING utf8mb4), '$[*]' COLUMNS (host VARCHAR(255) COLLATE utf8mb4_unicode_ci PATH '$.host')) AS jt\n  JOIN `groups` g ON g.name = CONVERT(FROM_BASE64($2) USING utf8mb4) COLLATE utf8mb4_unicode_ci\n) AS src\nON DUPLICATE KEY UPDATE group_id = src.gid;",
         "options": {
-          "queryReplacement": "={{ $('Normalize Payload').first().json.rows_json }},{{ $('Normalize Payload').first().json.group }}"
+          "queryReplacement": "={{ $('Normalize Payload').first().json.rows_b64 }},{{ $('Normalize Payload').first().json.group_b64 }}"
         }
       },
       "name": "Upsert Hosts",
@@ -78,9 +78,9 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO backup_records (host_id, group_id, report_date, reported_at, status, error_reason)\nSELECT h.id, g.id, DATE(UTC_TIMESTAMP() + INTERVAL 7 HOUR), UTC_TIMESTAMP(), jt.status, NULLIF(jt.error_reason, '')\nFROM JSON_TABLE($1, '$[*]' COLUMNS (\n  host VARCHAR(255) COLLATE utf8mb4_unicode_ci PATH '$.host',\n  status VARCHAR(10) PATH '$.status',\n  error_reason TEXT PATH '$.error_reason'\n)) AS jt\nJOIN hosts h ON h.hostname = jt.host\nJOIN `groups` g ON g.name = $2;",
+        "query": "INSERT INTO backup_records (host_id, group_id, report_date, reported_at, status, error_reason)\nSELECT h.id, g.id, DATE(UTC_TIMESTAMP() + INTERVAL 7 HOUR), UTC_TIMESTAMP(), jt.status, NULLIF(jt.error_reason, '')\nFROM JSON_TABLE(CONVERT(FROM_BASE64($1) USING utf8mb4), '$[*]' COLUMNS (\n  host VARCHAR(255) COLLATE utf8mb4_unicode_ci PATH '$.host',\n  status VARCHAR(10) PATH '$.status',\n  error_reason TEXT PATH '$.error_reason'\n)) AS jt\nJOIN hosts h ON h.hostname = jt.host\nJOIN `groups` g ON g.name = CONVERT(FROM_BASE64($2) USING utf8mb4) COLLATE utf8mb4_unicode_ci;",
         "options": {
-          "queryReplacement": "={{ $('Normalize Payload').first().json.rows_json }},{{ $('Normalize Payload').first().json.group }}"
+          "queryReplacement": "={{ $('Normalize Payload').first().json.rows_b64 }},{{ $('Normalize Payload').first().json.group_b64 }}"
         }
       },
       "name": "Insert Backup Records",
@@ -100,7 +100,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ ok: true, group: $('Normalize Payload').first().json.group, received: $('Normalize Payload').first().json.count, stored: $json.affectedRows ?? 0, warnings: $('Normalize Payload').first().json.warnings }) }}",
+        "responseBody": "={{ JSON.stringify({ ok: true, group: $('Normalize Payload').first().json.group, received: $('Normalize Payload').first().json.count, warnings: $('Normalize Payload').first().json.warnings }) }}",
         "options": {
           "responseCode": 200
         }
