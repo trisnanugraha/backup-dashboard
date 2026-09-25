@@ -42,7 +42,7 @@ MySQL dan n8n **tidak** dibuat oleh repo ini — memakai environment yang sudah 
    docker compose up -d --build
    curl -s localhost:3000/api/health
    ```
-   Dashboard terbuka di `http://<server>:8080` (`WEB_PORT`). Web memanggil API lewat proxy internal `/api/*` (env `API_URL`, default `http://api:3000`), jadi browser tidak perlu akses langsung ke port API dan tidak ada masalah CORS.
+   Dashboard terbuka di `http://<server>:8200` (`WEB_PORT`). Web memanggil API lewat proxy internal `/api/*` (env `API_URL`, default `http://api:3000`), jadi browser tidak perlu akses langsung ke port API dan tidak ada masalah CORS.
    Kalau MySQL existing berupa container di host yang sama, aktifkan blok `networks` di `docker-compose.yml`.
 
 ## n8n (ingest)
