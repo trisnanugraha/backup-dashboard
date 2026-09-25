@@ -21,27 +21,32 @@ n8n/src/sql.js           query MySQL node (set-based via JSON_TABLE)
 n8n/workflows/*.json     workflow siap import (hasil generate, jangan edit manual)
 scripts/build-n8n.js     generator workflow dari n8n/src
 api/                     REST API Express + mysql2
-docker-compose.yml       mysql + api (+ n8n via profile)
+docker-compose.yml       service api (MySQL & n8n memakai environment existing)
 ```
 
 ## Menjalankan
 
-```bash
-cp .env.example .env        # isi MYSQL_ROOT_PASSWORD, MYSQL_USER, MYSQL_PASSWORD
-docker compose up -d --build
-curl -s localhost:3000/api/health
-```
+MySQL dan n8n **tidak** dibuat oleh repo ini — memakai environment yang sudah ada.
 
-Kalau belum punya instance n8n: `docker compose --profile n8n up -d`.
-Kalau MySQL sudah ada di server lain, jalankan `db/schema.sql` manual lalu arahkan `MYSQL_HOST` ke sana.
-
-> `db/schema.sql` hanya dieksekusi otomatis saat volume `mysql-data` masih kosong (inisialisasi pertama).
+1. **Database** — di MySQL existing (8.0.20+), jalankan skema sekali:
+   ```bash
+   mysql -h <host> -u <admin> -p < db/schema.sql
+   ```
+   Skema membuat database `backup_monitoring` (utf8mb4) kalau belum ada dan semua tabelnya (`IF NOT EXISTS`, aman dijalankan ulang). Buat user aplikasi dengan hak `SELECT, INSERT, UPDATE, DELETE` pada `backup_monitoring.*`; user yang sama bisa dipakai API dan credential MySQL di n8n.
+2. **n8n** — import workflow (lihat bagian berikut).
+3. **API**:
+   ```bash
+   cp .env.example .env        # isi MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD
+   docker compose up -d --build
+   curl -s localhost:3000/api/health
+   ```
+   Kalau MySQL existing berupa container di host yang sama, aktifkan blok `networks` di `docker-compose.yml`.
 
 ## n8n (ingest)
 
 1. Di n8n buat credential **MySQL** (host/user/password dari `.env`), beri nama `MySQL backup_monitoring`.
 2. Import `n8n/workflows/kopia-backup.json` dan `kopia-verify.json`
-   (UI: *Workflows → Import from File*, atau CLI: `docker compose exec n8n n8n import:workflow --input=/workflows/kopia-backup.json`).
+   (UI: *Workflows → Import from File*, atau CLI di container n8n: `n8n import:workflow --input=kopia-backup.json`).
 3. Buka tiap node MySQL, pilih credential tadi, lalu **Activate** workflow.
 4. Endpoint: `POST /webhook/kopia-backup` dan `POST /webhook/kopia-verify`.
 
