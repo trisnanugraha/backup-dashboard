@@ -1,5 +1,5 @@
-# Backup Monitoring v2 — API saja. MySQL dan n8n memakai environment yang sudah ada;
-# isi MYSQL_HOST dkk di .env agar mengarah ke MySQL existing.
+# Backup Monitoring v2 — API + dashboard web. MySQL dan n8n memakai environment
+# yang sudah ada; isi MYSQL_HOST dkk di .env agar mengarah ke MySQL existing.
 #   docker compose up -d --build
 
 services:
@@ -16,6 +16,17 @@ services:
     # ke network compose-nya lalu isi MYSQL_HOST dengan nama service MySQL tsb:
     # networks:
     #   - db-net
+
+  web:
+    build: ./web
+    restart: unless-stopped
+    environment:
+      API_URL: http://api:3000
+      TZ: ${TIMEZONE:-Asia/Jakarta}
+    depends_on:
+      - api
+    ports:
+      - "${WEB_PORT:-8080}:3000"
 
 # networks:
 #   db-net:

@@ -9,7 +9,7 @@ Sistem ini dibangun **paralel**: Node-RED tetap berjalan dan tetap jadi sumber d
 | 2 | Workflow ingest n8n (`n8n/`) | selesai, teruji |
 | 3 | `GET /api/dashboard` | selesai, teruji |
 | 4 | `/api/history`, `/api/history/groups`, `/api/notes`, `/api/categories`, `/api/report/*` | selesai, teruji |
-| 5–6 | Dashboard React (Dashboard + History) | belum |
+| 5–6 | Dashboard React/Next.js (`web/`): halaman Dashboard + History | selesai, diuji di browser dengan data demo |
 | 7 | Laporan PDF + Telegram/Nextcloud | belum (endpoint datanya sudah ada) |
 
 ## Struktur
@@ -21,7 +21,9 @@ n8n/src/sql.js           query MySQL node (set-based via JSON_TABLE)
 n8n/workflows/*.json     workflow siap import (hasil generate, jangan edit manual)
 scripts/build-n8n.js     generator workflow dari n8n/src
 api/                     REST API Express + mysql2
-docker-compose.yml       service api (MySQL & n8n memakai environment existing)
+api/scripts/seed-demo.js data dummy ~6 bulan ke database demo terpisah (untuk development UI)
+web/                     dashboard Next.js + Tailwind + TanStack Query + Recharts
+docker-compose.yml       service api + web (MySQL & n8n memakai environment existing)
 ```
 
 ## Menjalankan
@@ -40,6 +42,7 @@ MySQL dan n8n **tidak** dibuat oleh repo ini — memakai environment yang sudah 
    docker compose up -d --build
    curl -s localhost:3000/api/health
    ```
+   Dashboard terbuka di `http://<server>:8080` (`WEB_PORT`). Web memanggil API lewat proxy internal `/api/*` (env `API_URL`, default `http://api:3000`), jadi browser tidak perlu akses langsung ke port API dan tidak ada masalah CORS.
    Kalau MySQL existing berupa container di host yang sama, aktifkan blok `networks` di `docker-compose.yml`.
 
 ## n8n (ingest)
@@ -99,10 +102,27 @@ Field tambahan di luar kontrak Node-RED (tidak mengubah field yang ada):
 - `calendarBackup` / `calendarVerify` di `/api/dashboard`, serta `calendar_backup` / `calendar_verify` di `/api/history`: success rate harian ~6 bulan untuk heatmap kalender.
 - `note_active` di `todaySummary`, `generatedAt`.
 
+## Dashboard (web/)
+
+- **Dashboard** (`/`): banner alert, statistik window berjalan & kemarin (Backup kiri, Verify kanan), trend 30 hari, top 5 group/host bermasalah (dengan strip 7 hari), aplikasi strategis bermasalah, counter kategori, Status Hari Ini (klik baris → History group tsb; ikon pensil = edit catatan di tempat), Detail per Host, Detail Verify per Group (expand, dropdown kategori inline, filter kategori), heatmap kalender 6 bulan.
+- **History** (`/history?group=<nama>`): sidebar group + pencarian; panel kanan berurutan: heatmap Backup & Verify, daftar aplikasi (kategori + catatan), daftar host (cari, urut Nama A-Z / Paling sering gagal / Paling baru gagal, expand: strip 30 hari, timeline backup, timeline verify group, catatan host, export CSV host, tombol "Lihat Log Server" nonaktif), catatan group. Tombol Export CSV Group (30 hari) di header.
+- Data di-render di server untuk load awal, lalu auto-refresh tiap 5 menit + tombol Refresh. Simpan catatan/kategori memakai optimistic update, lalu cache di-refresh.
+- Dark mode tersimpan di `localStorage` (default mengikuti OS).
+- Daftar kategori catatan ada di `web/lib/constants.ts` (`NOTE_CATEGORIES`) — sesuaikan dengan yang dipakai di Node-RED.
+
+Development lokal dengan data dummy (database **terpisah** `backup_monitoring_demo`, bukan produksi):
+
+```bash
+cd api && MYSQL_HOST=... MYSQL_USER=... MYSQL_PASSWORD=... node scripts/seed-demo.js
+MYSQL_DATABASE=backup_monitoring_demo API_PORT=3001 ... node src/server.js
+cd ../web && npm ci && API_URL=http://127.0.0.1:3001 npm run dev
+```
+
 ## Test
 
 ```bash
 cd api && npm ci
 npm test                                                   # unit test
 MYSQL_TEST_URL=mysql://user:pass@127.0.0.1:3306 npm test   # + integration (buat & hapus DB backup_monitoring_test)
+cd ../web && npm ci && npm test && npm run lint           # helper kalender/CSV + typecheck
 ```
